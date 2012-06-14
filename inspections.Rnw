@@ -93,7 +93,7 @@ then we would like to talk about why it takes so long for the
 department to inspect some restaurants and ways that we could improve
 a risk based inspection system.
 
-First, we should briefly describe the analyses we have done.
+First, we will briefly describe the analyses we have done.
 
 \subsection*{Analyses}
 To simplify the presentation, we will only discuss analyses of one
@@ -174,10 +174,9 @@ axis(1,
 
 \subsubsection*{Other Possibilities}
 Still, it is possible restaurants are being inspected in a timely
-manner, but there is some problems with how those inspections are
-being recorded. If the many inspections are not being recorded, or
-being recorded under the wrong license number, that may explain the
-pattern we observe.
+manner, but there are some problems with how those inspections are
+being recorded. If the many, many inspections are not being recorded,
+that may explain the pattern we observe.
 
 So, the first, and most important question is this. In your knowledge,
 how often does it happen that a restaurant is not inspected in over a
