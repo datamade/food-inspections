@@ -99,7 +99,7 @@ First, we will briefly describe the analyses we have done.
 To simplify the presentation, we will only discuss analyses of one
 kind of facility type: restaurants. All restaurants are currently
 classified as high risk facilities, and the patterns that we find for
-restaurants are much the same for other types of high risk facilities.
+restaurants are much the same for other types of high risk facilities. All analyses are current as of \Sexpr{format(Sys.Date(), "%B %d, %Y")}.
 
 \subsubsection*{Time Since Last Inspection}
 First, we can look at the how long it has been since a restaurant has
