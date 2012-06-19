@@ -1,0 +1,212 @@
+\documentclass{article}
+\title{Delays between Food Inspections}
+\author{Forest Gregg and Derek Eder}
+\usepackage{url}
+\usepackage{tikz}
+\usepackage{caption}
+%\usepackage{graphicx}
+\usepackage{subfigure}
+\usepackage[urw-garamond]{mathdesign}
+\usepackage[T1]{fontenc}
+\pgfrealjobname{foodinspections}
+\usepackage[nogin]{Sweave}
+\SweaveOpts{echo=F, width=4.5, height=4.75, prefix.string=/home/fgregg/sweave-cache/figs/fig, cache=T, results=hide, keep.source=F}
+
+<<preamble, cache=FALSE>>=
+setCacheDir('/home/fgregg/sweave-cache/values')
+#pdf.options(maxRaster=256)
+#options(SweaveHooks=list(fig=function()
+#          par(mar=c(1.1, 1.1, 1.1, 1.1))))
+@ 
+
+<<head>>=
+library(RSQLite)
+
+#bakery, banquet hall, candy store, caterer, coffee shop, day care center (for ages less than 2), day care center (for ages 2 ¡V 6), day care center (combo, for ages less than 2 and 2 ¡V 6 combined), gas station, Golden Diner, grocery store, hospital, long term care center(nursing home), liquor store, mobile food dispenser, restaurant, paleteria, school, shelter, tavern, social club, wholesaler, or Wrigley Field Rooftop.
+
+fm <- function(x) {
+  format(x, big.mark = ",", digits=2)
+}
+
+interVisitTimes <- function(inspections, facility.type) {
+  inter.visit.times = data.frame(ivt=numeric(0), results=character(0))
+  #subset inspections
+  inspections = inspections[inspections$facility_type == facility.type,
+    c("license_no", "inspection_date", "inspection_type", "results")]
+
+  print(dim(inspections))
+
+  licenses <- unique(inspections$license_no)
+  for (license in licenses) {
+    visits <- inspections[inspections$license_no == license,]
+    visits <- visits[order(visits$inspection_date),]    
+
+    visits.num = dim(visits)[1]
+    if (visits.num > 2) {
+      for (i in 1:(visits.num-1)) {
+        ivt <- (visits[i+1, "inspection_date"]
+                             - visits[i, "inspection_date"])
+        ivt <- as.numeric(ivt)
+        results <- as.character(visits[i, "results"])
+        #if (inter.visit.time > 600) {
+        #  print(visits)
+        #}
+        #if (visits[i, "results"] == "Out of Business" & i != visits.num) {
+        #  print(visits)
+        #}
+        inter.visit.times = rbind(inter.visit.times, data.frame(ivt, results))
+      }
+    }
+  }
+  return(inter.visit.times)
+}
+@ 
+
+<<loadData, cache=T>>=
+drv <- dbDriver("SQLite")
+con <- dbConnect(drv, "./inspections.db")
+
+inspections<- dbGetQuery(con, "SELECT * FROM inspections_clean")
+
+last.inspections <- dbGetQuery(con, "SELECT *
+    FROM inspections_clean INNER JOIN (SELECT license_no AS ln, MAX(inspection_date) AS last_inspection FROM inspections_clean GROUP BY license_no) ON license_no=ln AND inspection_date = last_inspection WHERE results != 'Out of Business' and facility_type = 'restaurant'")
+
+dbDisconnect(con)
+
+inspections$inspection_date <- as.Date(inspections$inspection_date)
+last.inspections$inspection_date <- as.Date(last.inspections$inspection_date)
+@
+
+\begin{document}
+\maketitle
+
+<<summaries>>=
+elapsed.time <- as.numeric(Sys.Date() - last.inspections$inspection_date)
+overdue <- elapsed.time[elapsed.time > 365]
+percentage.overdue <- round((length(overdue)/length(elapsed.time)*100),0)
+@ 
+
+\begin{figure}[h!]
+  \centering
+<<lastInspection, fig=TRUE, cache=F>>=
+br = seq(0, 949, 73)
+hist(elapsed.time,
+     breaks=br,
+     xaxt="n",
+     ylim=c(0,2000), 
+     main = "Times Since Last Inspection of Restaurants",
+     xlab = "Time Since Last Inspection", 
+     ylab = "Number of Restaurants")
+     
+axis(1, 
+     at=c(365, 730), 
+     labels=c("One Year", "Two Years"), 
+     lwd=0, 
+     lwd.ticks = 1)
+@ 
+\caption{Elapsed time since last inspection of restaurants. We have omitted restaurants where the last inspection had the result ``Out of Business.''}
+\label{fig:elapsed}
+
+\end{figure}
+
+<<interInspections,cache=F>>=
+ivt = interVisitTimes(inspections, "restaurant")
+@ 
+\begin{figure}[h!]
+  \centering
+<<interInspectionsHist, fig=TRUE>>=
+hist(ivt$ivt, breaks=br, xaxt="n",
+     main = "Times Between Inspections of Restaurants",
+     xlab = "Time Between Inspections", 
+     ylab = "Frequency")
+axis(1, 
+     at=c(365, 730), 
+     labels=c("One Year", "Two Years"), 
+     lwd=0, 
+     lwd.ticks = 1)
+@
+\caption{Frequency of Times between Inspections of Restaurants}
+\label{fig:intertimes}
+\end{figure}
+
+<<inspectionTypes, results=tex, cache=F>>=
+inspection.types <- table(tolower(as.character(inspections$inspection_type)))
+inspection.types <- inspection.types*100/dim(inspections)[1]
+inspection.types <- inspection.types[order(-inspection.types)]
+inspection.types <- as.data.frame(inspection.types[inspection.types > 5])
+inspection.types <- rbind(inspection.types, sum(inspection.types))
+rownames(inspection.types)[7] <- "Total"
+
+inspection.types.tab <- xtable(inspection.types, digits=0, caption=paste("Distribution of Inspection Types, N=", fm(dim(inspections[1]))))
+colnames(inspection.types.tab) <- "Percent of Inspections"
+
+print(inspection.types.tab)
+@ 
+
+<<ivtResults>>=
+summary(polr(ordered(results) ~ scale(ivt) + I(scale(ivt)^2) + I(scale(ivt)^3), ivt[ivt$results %in% c("Pass", "Pass w/ Conditions", "Fail"),], Hess=TRUE) )
+@ 
+
+
+\end{document}
+
+
+According to the rules and regulations of the Department of Public
+Health, restaurants are to be inspected at least once a
+year.\footnote{\url{http://www.cityofchicago.org/dam/city/depts/cdph/food_env/general/REGSSelfCertPilotdraftposting321.pdf}}
+However, from data on food inspections released by the
+department,\footnote{\url{https://data.cityofchicago.org/Health-Human-Services/Food-Inspections/4ijn-s7e5}}
+it appears that \Sexpr{percentage.overdue}\% of restaurants have not
+been inspected in over a year.
+
+Today, we want make sure that this is roughly true. If it is true,
+then we would like to talk about why it takes so long for the
+department to inspect some restaurants and ways that we could improve
+a risk based inspection system.
+
+First, we will briefly describe the analyses we have done.
+
+\subsection*{Analyses}
+To simplify the presentation, we will only discuss analyses of one
+kind of facility type: restaurants. All restaurants are currently
+classified as high risk facilities, and the patterns that we find for
+restaurants are much the same for other types of high risk facilities. All analyses are current as of \Sexpr{format(Sys.Date(), "%B %d, %Y")}.
+
+\subsubsection*{Time Since Last Inspection}
+First, we can look at the how long it has been since a restaurant has
+been inspected. For this analysis, we only want to consider
+restaurants that are still open for business. It's far from perfect,
+but as a first pass, we will only look at restaurants where the last
+recorded inspection was a pass, a conditional pass, or a fail.
+
+In that analysis, \Sexpr{prettyNum(length(overdue), big.mark=",")} restaurants or
+\Sexpr{percentage.overdue}\% are overdue for an inspection. In Figure
+\ref{fig:elapsed}, we can see the distribution of elapsed times since
+the last inspection.
+
+\subsubsection*{Intervals Between Inspections}
+
+Unfortunately, we do not know if it is safe to assume that the reason
+a restaurant hasn't been inspected is that the department has not
+gotten around to it. It could be that the restaurant has closed since
+the last inspection, and that fact is not recorded in the data.
+
+So, let us look at it another way. For restaurants where we have
+record of more than one inspection, we can calculate how much time
+elapsed between inspections. This is a more conservative approach,
+because if a sanitarian went to inspect a restaurant, we are safer in
+assuming its because the department thought the restaurant was a going
+concern. When we look at the distribution of inter-inspection times
+(Figure \ref{fig:intertimes}), we find many instances where more than
+a year elapsed between inspections.
+
+\subsubsection*{Other Possibilities}
+Still, it is possible restaurants are being inspected in a timely
+manner, but there are some problems with how those inspections are
+being recorded. If the many, many inspections are not being recorded,
+that may explain the pattern we observe.
+
+So, the first, and most important question is this. In your knowledge,
+how often does it happen that a restaurant is not inspected in over a
+year?
+
