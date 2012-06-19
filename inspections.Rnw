@@ -24,6 +24,8 @@ library(RSQLite)
 
 #bakery, banquet hall, candy store, caterer, coffee shop, day care center (for ages less than 2), day care center (for ages 2 ¡V 6), day care center (combo, for ages less than 2 and 2 ¡V 6 combined), gas station, Golden Diner, grocery store, hospital, long term care center(nursing home), liquor store, mobile food dispenser, restaurant, paleteria, school, shelter, tavern, social club, wholesaler, or Wrigley Field Rooftop.
 
+
+
 interVisitTimes <- function(inspections, facility.type) {
   ivt = c()
   #subset inspections
