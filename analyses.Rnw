@@ -4,6 +4,7 @@
 \usepackage{url}
 \usepackage{tikz}
 \usepackage{caption}
+\usepackage{multicol}
 %\usepackage{graphicx}
 \usepackage{subfigure}
 \usepackage[urw-garamond]{mathdesign}
@@ -14,47 +15,63 @@
 
 <<preamble, cache=FALSE>>=
 setCacheDir('/home/fgregg/sweave-cache/values')
+library(RSQLite)
+library(xtable)
+library(MASS)
+
 #pdf.options(maxRaster=256)
 #options(SweaveHooks=list(fig=function()
 #          par(mar=c(1.1, 1.1, 1.1, 1.1))))
 @ 
 
 <<head>>=
-library(RSQLite)
 
 #bakery, banquet hall, candy store, caterer, coffee shop, day care center (for ages less than 2), day care center (for ages 2 ¡V 6), day care center (combo, for ages less than 2 and 2 ¡V 6 combined), gas station, Golden Diner, grocery store, hospital, long term care center(nursing home), liquor store, mobile food dispenser, restaurant, paleteria, school, shelter, tavern, social club, wholesaler, or Wrigley Field Rooftop.
 
 fm <- function(x) {
-  format(x, big.mark = ",", digits=2)
+  return(format(x, big.mark = ",", digits=2))
 }
 
-interVisitTimes <- function(inspections, facility.type) {
-  inter.visit.times = data.frame(ivt=numeric(0), results=character(0))
-  #subset inspections
-  inspections = inspections[inspections$facility_type == facility.type,
-    c("license_no", "inspection_date", "inspection_type", "results")]
+expit <- function(x) {
+  return(exp(x)/(1 + exp(x)))
+}
+
+
+interVisitTimes <- function(inspections) {
+  inter.visit.times = data.frame(ivt=numeric(0), 
+                                 license_no = numeric(0),
+                                 results=character(0),
+                                 inspection_type = character(0),
+                                 inspection_date = character(0))
+  
+  inspections = inspections[, c("license_no", 
+                                "inspection_date", 
+                                "inspection_type", 
+                                "results")]
+
+  inspections$results <- as.character(inspections$results)
+  inspections$inspection_types <- as.character(inspections$inspection_type)
+
+  inspections <- inspections[order(inspections$inspection_date),]    
 
   print(dim(inspections))
 
   licenses <- unique(inspections$license_no)
   for (license in licenses) {
     visits <- inspections[inspections$license_no == license,]
-    visits <- visits[order(visits$inspection_date),]    
 
     visits.num = dim(visits)[1]
     if (visits.num > 2) {
-      for (i in 1:(visits.num-1)) {
-        ivt <- (visits[i+1, "inspection_date"]
-                             - visits[i, "inspection_date"])
+      for (i in 2:(visits.num-1)) {
+        ivt <- (visits[i, "inspection_date"]
+                             - visits[i-1, "inspection_date"])
         ivt <- as.numeric(ivt)
-        results <- as.character(visits[i, "results"])
-        #if (inter.visit.time > 600) {
-        #  print(visits)
-        #}
-        #if (visits[i, "results"] == "Out of Business" & i != visits.num) {
-        #  print(visits)
-        #}
-        inter.visit.times = rbind(inter.visit.times, data.frame(ivt, results))
+        visit.info <- visits[i, c("license_no", 
+                                  "results", 
+                                  "inspection_type",
+                                  "inspection_date")]
+        inter.visit.times = rbind(inter.visit.times, 
+                                  data.frame(ivt, visit.info))
       }
     }
   }
@@ -69,7 +86,7 @@ con <- dbConnect(drv, "./inspections.db")
 inspections<- dbGetQuery(con, "SELECT * FROM inspections_clean")
 
 last.inspections <- dbGetQuery(con, "SELECT *
-    FROM inspections_clean INNER JOIN (SELECT license_no AS ln, MAX(inspection_date) AS last_inspection FROM inspections_clean GROUP BY license_no) ON license_no=ln AND inspection_date = last_inspection WHERE results != 'Out of Business' and facility_type = 'restaurant'")
+    FROM inspections_clean INNER JOIN (SELECT license_no AS ln, MAX(inspection_date) AS last_inspection FROM inspections_clean GROUP BY license_no) ON license_no=ln AND inspection_date = last_inspection WHERE results != 'Out of Business' and facility_type = 'restaurant' and risk = 'Risk 1 (High)'")
 
 dbDisconnect(con)
 
@@ -89,11 +106,10 @@ percentage.overdue <- round((length(overdue)/length(elapsed.time)*100),0)
 \begin{figure}[h!]
   \centering
 <<lastInspection, fig=TRUE, cache=F>>=
-br = seq(0, 949, 73)
+br <- seq(0, 949, 73)
 hist(elapsed.time,
      breaks=br,
      xaxt="n",
-     ylim=c(0,2000), 
      main = "Times Since Last Inspection of Restaurants",
      xlab = "Time Since Last Inspection", 
      ylab = "Number of Restaurants")
@@ -109,15 +125,36 @@ axis(1,
 
 \end{figure}
 
-<<interInspections,cache=F>>=
-ivt = interVisitTimes(inspections, "restaurant")
+<<interInspections,cache=T>>=
+
+inspections$inspection_type == as.factor(tolower(inspections$inspection_type))
+
+inspections <- inspections[!tolower(inspections$inspection_type) 
+                           %in% c("no entry", 
+                                  "non-inspection", 
+                                  "no entry-short complaint"),]
+
+rest.inspections <-  inspections[inspections$facility_type == "restaurant",]
+
+non.high.risk <- unique(inspections[inspections$risk 
+                                    %in% c("Risk 2 (Medium)", 
+                                           "Risk 3 (Low)"), 
+                                    "license_no"])
+
+rest.inspections <- rest.inspections[!rest.inspections$license_no 
+                                     %in% non.high.risk,]
+
+ivt <- interVisitTimes(rest.inspections)
+
 @ 
+
+
 \begin{figure}[h!]
   \centering
 <<interInspectionsHist, fig=TRUE>>=
 hist(ivt$ivt, breaks=br, xaxt="n",
-     main = "Times Between Inspections of Restaurants",
-     xlab = "Time Between Inspections", 
+     main = "Times Since Last Vist",
+     xlab = "Time Since Last Visit", 
      ylab = "Frequency")
 axis(1, 
      at=c(365, 730), 
@@ -130,7 +167,7 @@ axis(1,
 \end{figure}
 
 <<inspectionTypes, results=tex, cache=F>>=
-inspection.types <- table(tolower(as.character(inspections$inspection_type)))
+inspection.types <- table(inspections$inspection_type)
 inspection.types <- inspection.types*100/dim(inspections)[1]
 inspection.types <- inspection.types[order(-inspection.types)]
 inspection.types <- as.data.frame(inspection.types[inspection.types > 5])
@@ -143,13 +180,348 @@ colnames(inspection.types.tab) <- "Percent of Inspections"
 print(inspection.types.tab)
 @ 
 
-<<ivtResults>>=
-summary(polr(ordered(results) ~ scale(ivt) + I(scale(ivt)^2) + I(scale(ivt)^3), ivt[ivt$results %in% c("Pass", "Pass w/ Conditions", "Fail"),], Hess=TRUE) )
+\begin{figure}[h!]
+  \centering
+<<inspectionTypesHist, fig=TRUE>>=
+ivt$inspection_type <- as.factor(tolower(ivt$inspection_type))
+
+par(mfrow=c(3,1))
+
+smallHist <- function(x, mainlabel, br, ymax) {
+  hist(x, 
+       breaks=br, 
+       main=mainlabel, 
+       xaxt="n", 
+       ylim=c(0, ymax),
+       xlab = "Time Since Last Visit",
+       ylab = "Number of Inspections"
+)  
+  axis(1, 
+     at=c(365, 730), 
+     labels=c("One Year", "Two Years"), 
+     lwd=0,
+     lwd.ticks = 1)
+}
+
+ymax = 800
+
+smallHist(ivt[ivt$inspection_type %in% c("canvass"), "ivt"], "Canvass", br, ymax)
+
+smallHist(ivt[ivt$inspection_type %in% c("complaint"), "ivt"], "Complaint", br, ymax)
+
+smallHist(ivt[ivt$inspection_type %in% c("short form complaint"), "ivt"], 
+          "Short Form Complaint", br, ymax)
+
+par(mfrow=c(1,1))
+
+@ 
+\end{figure}
+
+<<ivtResults, eval=TRUE, cache=F>>=
+evaluations <- ivt[ivt$results %in% c("Pass", "Pass w/ Conditions", "Fail"),]
+evaluations$results <- ordered(evaluations$results, 
+                               levels=c("Fail", "Pass w/ Conditions", "Pass"))
+
+real.evaluations <- evaluations[evaluations$inspection_type 
+                                %in% c("canvass", 
+                                       "complaint",
+                                       "short form complaint")
+                                & evaluations$ivt > 60,]
+
+real.evaluations$inspection_type <- factor(real.evaluations$inspection_type)
+
+riskTime <- polr(results ~ scale(ivt) 
+                 + I(scale(ivt)^2) 
+                 + I(scale(ivt)^3)
+                 + inspection_type
+                 , 
+                 real.evaluations, Hess=TRUE) 
+
+@ 
+
+<<riskInspectionType, results=tex, cache=F>>=
+riskInspectionType <- polr(results ~ inspection_type, 
+                           real.evaluations)
+
+
+
+canvass.fail <- expit(riskInspectionType$zeta[1])
+canvass.cond.pass <- expit(riskInspectionType$zeta[2]) - canvass.fail
+canvass.pass <- 1 - canvass.fail - canvass.cond.pass
+
+complaint.fail <- expit(riskInspectionType$zeta[1] 
+                        - coef(riskInspectionType)[1])
+complaint.cond.pass <- (expit(riskInspectionType$zeta[2] 
+                              - coef(riskInspectionType)[1])
+                        - complaint.fail)
+complaint.pass <- 1 - complaint.fail - complaint.cond.pass
+
+sf.complaint.fail <- expit(riskInspectionType$zeta[1] 
+                        - coef(riskInspectionType)[2])
+sf.complaint.cond.pass <- (expit(riskInspectionType$zeta[2] 
+                              - coef(riskInspectionType)[2])
+                        - sf.complaint.fail)
+sf.complaint.pass <- 1 - sf.complaint.fail - sf.complaint.cond.pass
+
+result.by.type <- rbind(c(canvass.fail, canvass.cond.pass, canvass.pass),
+                        c(complaint.fail, complaint.cond.pass, complaint.pass),
+                        c(sf.complaint.fail, sf.complaint.cond.pass, sf.complaint.pass)) 
+
+rownames(result.by.type) <- c("Canvass", "Complaint", "Short Form Complaint")
+colnames(result.by.type) <- c("Fail", "Cond. Pass", "Pass")
+
+xtable(result.by.type)
+                        
+
 @ 
 
 
-\end{document}
+\begin{figure}[h!]
+  \centering
+<<fig=TRUE, cache=F>>=
+x <- scale(sort(real.evaluations$ivt))
 
+fail <- (riskTime$zeta[1] -
+         (coef(riskTime)[1] * x +
+          coef(riskTime)[2] * x^2 +
+          coef(riskTime)[3] * x^3
+          ))
+
+fail <- expit(fail)
+
+cond.pass <- (riskTime$zeta[2] -
+              (coef(riskTime)[1] * x +
+               coef(riskTime)[2] * x^2 +
+               coef(riskTime)[3] * x^3
+               ))
+
+cond.pass <- expit(cond.pass)
+
+cond.pass <- cond.pass - fail
+
+pass <- 1 - cond.pass - fail
+
+par(mfrow=c(2,2))
+         
+         
+plot(fail ~ sort(real.evaluations$ivt), type="l", ylim=c(0,1), xlim=c(60,547.5), xaxt="n", yaxt="n", xlab="Time Since Last Visit", ylab="Proportion of Canvasses", main="Failing", xaxs="i")
+     
+  axis(1, 
+     at=c(182.5, 365,547.5), 
+     labels=c("6 Months", "12 Months", "18 Months"), 
+     lwd=0,
+     lwd.ticks = 1)
+
+  axis(2, 
+     at=c(0, 0.5, 1), 
+     labels=c("0\\%", "50\\%", "100\\%"), 
+     lwd=0,
+     lwd.ticks = 1)
+
+rug(real.evaluations[real.evaluations$results == "Fail", "ivt"], col=rgb(0,0,0,.1))
+
+
+plot(pass ~ sort(real.evaluations$ivt), type="l", ylim=c(0,1), xlim=c(60,547.5), xaxt="n", yaxt="n", xlab="Time Since Last Visit", ylab="Proportion of Canvasses", main="Passing", xaxs="i")
+     
+axis(1, 
+     at=c(182.5, 365,547.5), 
+     labels=c("6 Months", "12 Months", "18 Months"), 
+     lwd=0,
+     lwd.ticks = 1)
+
+  axis(2, 
+     at=c(0, 0.5, 1), 
+     labels=c("0\\%", "50\\%", "100\\%"), 
+     lwd=0,
+     lwd.ticks = 1)
+
+rug(real.evaluations[real.evaluations$results == "Pass", "ivt"],
+    col=rgb(0,0,0,.1))
+
+
+plot(cond.pass ~ sort(real.evaluations$ivt), type="l", ylim=c(0,1), xlim=c(60,547.5), xaxt="n", yaxt="n", xlab="Time Since Last Visit", ylab="Proportion of Canvasses", main="Conditional Passing", xaxs="i")
+     
+axis(1, 
+     at=c(182.5, 365,547.5), 
+     labels=c("6 Months", "12 Months", "18 Months"), 
+     lwd=0,
+     lwd.ticks = 1)
+
+axis(2, 
+     at=c(0, 0.5, 1), 
+     labels=c("0\\%", "50\\%", "100\\%"), 
+     lwd=0,
+     lwd.ticks = 1)
+
+rug(real.evaluations[real.evaluations$results == "Pass w/ Conditions", "ivt"], col=rgb(0,0,0,.1))
+
+par(mfrow=c(1,1))
+
+@ 
+\caption{Proportions of failing, passing, and conditional passing results of canvass inspections of high-risk restaurants by time since last visit. We have omitted canvass inspections occurring within two months of a previous visit. Many of these ``canvass inspections'' seem to be incorrectly coded.}
+\end{figure}
+
+<<facilityTypes, results=tex, cache=F>>=
+low.risk <- unique(inspections[inspections$risk == "Risk 3 (Low)", 
+                               "license_no"])
+
+med.risk <- unique(inspections[inspections$risk == "Risk 2 (Medium)", 
+                               "license_no"])
+
+high.risk <- unique(inspections[inspections$risk == "Risk 1 (High)", 
+                                "license_no"])
+
+multi.risk <- unique(intersect(low.risk, med.risk),
+                     intersect(low.risk, high.risk),
+                     intersect(med.risk, high.risk))
+
+facilities <- unique(inspections[!inspections$license_no %in% multi.risk &
+                                 inspections$risk %in% c("Risk 1 (High)", 
+                                                         "Risk 2 (Medium)",
+                                                         "Risk 3 (Low)"),
+                                 c("license_no", "facility_type", "risk")])
+facilities$risk <- factor(facilities$risk)
+
+daycares <- c("daycare",
+              "daycare 0-6 years",
+              "daycare 1584/1585",
+              "daycare 1586",
+              "daycare 2-6, under 6",
+              "daycare (2 - 6 years)",
+              "daycare (2 years)",
+              "daycare above and under 2 years",
+              "day care center under 2 and 2 -6 years",
+              "day care combo (1586)",
+              "daycare combo 1586",
+              "daycare night",
+              "daycare under 2 and daycare above 2",
+              "daycare (under 2 years)",
+              "1584-day care above 2 years",
+              "1586")
+
+facilities[facilities$facility_type %in% daycares, 
+           "facility_type"] <- "daycare" 
+                                          
+top.facilities <- c("restaurant",
+                    "grocery store",
+                    "",
+                    "school",
+                    "daycare",
+                    "bakery")
+
+clean.unique.facilities <- dim(facilities)[1]
+
+facilities <- facilities[facilities$facility_type %in% top.facilities,]
+
+facility.names <- c("restaurant",
+                   "grocery store",
+                    "unlabeled",
+                    "school",
+                    "daycare, all types",
+                    "bakery")
+
+facilityCount <- table(facilities$facility_type)
+facilityCount <- facilityCount[order(-facilityCount)]
+facilityCount <- cbind(facilityCount, facilityCount/clean.unique.facilities)
+facilityCount <- rbind(facilityCount, colSums(facilityCount))
+
+rownames(facilityCount) <- c(facility.names, "Total")
+colnames(facilityCount) <- c("Count", "Proportion")
+
+fc.tab <- xtable(facilityCount, digits=c(0,0,2))
+print(fc.tab, format.args=list(big.mark = ","))
+@ 
+
+<<facilityRisks, results=tex, cache=F>>=
+
+
+riskFacilities <- table(facilities$facility_type, 
+                        facilities$risk)
+
+riskFacilities <- riskFacilities[order(-table(facilities$facility_type)),]
+names(riskFacilities) <- facility.names
+
+xtable(riskFacilities)
+@ 
+
+<<proportions, results=tex, cache=F>>=
+xtable(prop.table(riskFacilities, 1))
+@ 
+
+
+\newpage
+\appendix
+Data  problems.
+
+\subsection*{Same License Number Assigned to Different Facilities}
+Every license should have a unique license number. but I found a
+handful of license numbers that seem to have been assigned to
+different licenses. For nearly all these non-unique licenses, the
+license was assigned to both a school and some other type of facility. 
+
+I omitted inspections corresponding to these licenses in my analyses.
+
+\begin{multicols}{5}
+\begin{itemize}
+\item 22992
+\item 1578 
+\item 29151
+\item 25152
+\item 26651
+\item 22951
+\item 23431
+\item 22971
+\item 23891
+\item 23031
+\item 1362
+\item 26821
+\item 25251
+\item 25811
+\item 23081
+\item 31231
+\item 18236
+\item 26591
+\item 31061
+\item 1516266
+\item 2031937
+\item 2041759
+\item 1816680
+\item 24621
+\item 70217
+\item 22641
+\item 22952
+\item 22181
+\item 23021
+\item 23011
+\item 46041
+\item 23051
+\item 22811
+\item 46041
+\item 26791
+\item 25901
+\item 51011
+\item 46241
+\item 23101
+\item 23041
+\item 22361
+\item 2142655
+\item 1932
+\item 24871
+\item 23071
+\item 26891
+\item 29151
+\item 23151
+\item 0                    
+\end{itemize}
+\end{multicols}
+
+\subsubsection*{Irregular Entry of Facility Types}
+For different visits to the same facility, the facility type was often
+recorded in different ways or omitted entirely. For each license, I
+found the most common, non-blank, facility type, and used that value
+as the facility type for all the inspections of the facility.
+
+\end{document}
 
 According to the rules and regulations of the Department of Public
 Health, restaurants are to be inspected at least once a
@@ -210,3 +582,19 @@ So, the first, and most important question is this. In your knowledge,
 how often does it happen that a restaurant is not inspected in over a
 year?
 
+names(multi.facility) <- c("soldier field", 
+                           "wrigley", 
+                           "truman college canteen",
+                           "mccormick place",
+                           "fortuna market, grill, and deli",
+                           "united center")
+              
+multi.facility <- c(1354323, 
+                    1574001,
+                    21604,
+                    1932257,
+                    1593364,
+                    1974745)
+
+
+                    
