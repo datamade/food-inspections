@@ -4,7 +4,7 @@ from AsciiDammit import asciiDammit
 import datetime
 
 def mode(l) :
-  counts = [(l.count(val), val) for val in set(l)]
+  counts = [(l.count(val), val) for val in set(l) if val != '']
   return sorted(counts)[-1][1]
 
 conn = sqlite3.connect('inspections.db')
