@@ -230,7 +230,7 @@ real.evaluations <- evaluations[evaluations$inspection_type
 
 real.evaluations$inspection_type <- factor(real.evaluations$inspection_type)
 
-riskTime <- polr(results ~ scale(ivt) 
+risk.time <- polr(results ~ scale(ivt) 
                  + I(scale(ivt)^2) 
                  + I(scale(ivt)^3)
                  + inspection_type
@@ -239,27 +239,27 @@ riskTime <- polr(results ~ scale(ivt)
 
 @ 
 
-<<riskInspectionType, results=tex, cache=F>>=
-riskInspectionType <- polr(results ~ inspection_type, 
+<<risk.inspection.type, results=tex, cache=F>>=
+risk.inspection.type <- polr(results ~ inspection_type, 
                            real.evaluations)
 
 
 
-canvass.fail <- expit(riskInspectionType$zeta[1])
-canvass.cond.pass <- expit(riskInspectionType$zeta[2]) - canvass.fail
+canvass.fail <- expit(risk.inspection.type$zeta[1])
+canvass.cond.pass <- expit(risk.inspection.type$zeta[2]) - canvass.fail
 canvass.pass <- 1 - canvass.fail - canvass.cond.pass
 
-complaint.fail <- expit(riskInspectionType$zeta[1] 
-                        - coef(riskInspectionType)[1])
-complaint.cond.pass <- (expit(riskInspectionType$zeta[2] 
-                              - coef(riskInspectionType)[1])
+complaint.fail <- expit(risk.inspection.type$zeta[1] 
+                        - coef(risk.inspection.type)[1])
+complaint.cond.pass <- (expit(risk.inspection.type$zeta[2] 
+                              - coef(risk.inspection.type)[1])
                         - complaint.fail)
 complaint.pass <- 1 - complaint.fail - complaint.cond.pass
 
-sf.complaint.fail <- expit(riskInspectionType$zeta[1] 
-                        - coef(riskInspectionType)[2])
-sf.complaint.cond.pass <- (expit(riskInspectionType$zeta[2] 
-                              - coef(riskInspectionType)[2])
+sf.complaint.fail <- expit(risk.inspection.type$zeta[1] 
+                        - coef(risk.inspection.type)[2])
+sf.complaint.cond.pass <- (expit(risk.inspection.type$zeta[2] 
+                              - coef(risk.inspection.type)[2])
                         - sf.complaint.fail)
 sf.complaint.pass <- 1 - sf.complaint.fail - sf.complaint.cond.pass
 
@@ -281,18 +281,18 @@ xtable(result.by.type)
 <<fig=TRUE, cache=F>>=
 x <- scale(sort(real.evaluations$ivt))
 
-fail <- (riskTime$zeta[1] -
-         (coef(riskTime)[1] * x +
-          coef(riskTime)[2] * x^2 +
-          coef(riskTime)[3] * x^3
+fail <- (risk.time$zeta[1] -
+         (coef(risk.time)[1] * x +
+          coef(risk.time)[2] * x^2 +
+          coef(risk.time)[3] * x^3
           ))
 
 fail <- expit(fail)
 
-cond.pass <- (riskTime$zeta[2] -
-              (coef(riskTime)[1] * x +
-               coef(riskTime)[2] * x^2 +
-               coef(riskTime)[3] * x^3
+cond.pass <- (risk.time$zeta[2] -
+              (coef(risk.time)[1] * x +
+               coef(risk.time)[2] * x^2 +
+               coef(risk.time)[3] * x^3
                ))
 
 cond.pass <- expit(cond.pass)
@@ -420,32 +420,32 @@ facility.names <- c("restaurant",
                     "daycare, all types",
                     "bakery")
 
-facilityCount <- table(facilities$facility_type)
-facilityCount <- facilityCount[order(-facilityCount)]
-facilityCount <- cbind(facilityCount, facilityCount/clean.unique.facilities)
-facilityCount <- rbind(facilityCount, colSums(facilityCount))
+facility.count <- table(facilities$facility_type)
+facility.count <- facility.count[order(-facility.count)]
+facility.count <- cbind(facility.count, facility.count/clean.unique.facilities)
+facility.count <- rbind(facility.count, colSums(facility.count))
 
-rownames(facilityCount) <- c(facility.names, "Total")
-colnames(facilityCount) <- c("Count", "Proportion")
+rownames(facility.count) <- c(facility.names, "Total")
+colnames(facility.count) <- c("Count", "Proportion")
 
-fc.tab <- xtable(facilityCount, digits=c(0,0,2))
+fc.tab <- xtable(facility.count, digits=c(0,0,2))
 print(fc.tab, format.args=list(big.mark = ","))
 @ 
 
 <<facilityRisks, results=tex, cache=F>>=
 
 
-riskFacilities <- table(facilities$facility_type, 
+risk.facilities <- table(facilities$facility_type, 
                         facilities$risk)
 
-riskFacilities <- riskFacilities[order(-table(facilities$facility_type)),]
-names(riskFacilities) <- facility.names
+risk.facilities <- risk.facilities[order(-table(facilities$facility_type)),]
+names(risk.facilities) <- facility.names
 
-xtable(riskFacilities)
+xtable(risk.facilities)
 @ 
 
 <<proportions, results=tex, cache=F>>=
-xtable(prop.table(riskFacilities, 1))
+xtable(prop.table(risk.facilities, 1))
 @ 
 
 
