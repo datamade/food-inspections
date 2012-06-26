@@ -1,6 +1,6 @@
 \documentclass{article}
 \title{Delays between Food Inspections}
-\author{Forest Gregg and Derek Eder}
+\author{Forest Gregg, Open City\thanks{All analyses are current as of \Sexpr{format(Sys.Date(), "%B %d, %Y")}.}}
 \usepackage{url}
 \usepackage{tikz}
 \usepackage{caption}
@@ -36,6 +36,12 @@ expit <- function(x) {
   return(exp(x)/(1 + exp(x)))
 }
 
+capwords <- function(s, strict = FALSE) {
+    cap <- function(s) paste(toupper(substring(s,1,1)),
+                  {s <- substring(s,2); if(strict) tolower(s) else s},
+                             sep = "", collapse = " " )
+    sapply(strsplit(s, split = " "), cap, USE.NAMES = !is.null(names(s)))
+}
 
 interVisitTimes <- function(inspections) {
   inter.visit.times = data.frame(ivt=numeric(0), 
@@ -85,33 +91,163 @@ con <- dbConnect(drv, "./inspections.db")
 
 inspections<- dbGetQuery(con, "SELECT * FROM inspections_clean")
 
-last.inspections <- dbGetQuery(con, "SELECT *
+rest.inspections <-  inspections[inspections$facility_type == "restaurant",]
+
+non.high.risk <- unique(rest.inspections[rest.inspections$risk 
+                                         %in% c("Risk 2 (Medium)", 
+                                                "Risk 3 (Low)"), 
+                                         "license_no"])
+
+rest.inspections <- rest.inspections[!rest.inspections$license_no 
+                                     %in% non.high.risk,]
+
+rest.inspections$inspection_type <- as.factor(tolower(rest.inspections$inspection_type))
+
+
+
+last.rest.inspections <- dbGetQuery(con, "SELECT *
     FROM inspections_clean INNER JOIN (SELECT license_no AS ln, MAX(inspection_date) AS last_inspection FROM inspections_clean GROUP BY license_no) ON license_no=ln AND inspection_date = last_inspection WHERE results != 'Out of Business' and facility_type = 'restaurant' and risk = 'Risk 1 (High)'")
+
+last.inspections <- dbGetQuery(con, "SELECT *
+    FROM inspections_clean INNER JOIN (SELECT license_no AS ln, MAX(inspection_date) AS last_inspection FROM inspections_clean GROUP BY license_no) ON license_no=ln AND inspection_date = last_inspection WHERE results != 'Out of Business'")
+
 
 dbDisconnect(con)
 
 inspections$inspection_date <- as.Date(inspections$inspection_date)
+rest.inspections$inspection_date <- as.Date(rest.inspections$inspection_date)
 last.inspections$inspection_date <- as.Date(last.inspections$inspection_date)
+last.rest.inspections$inspection_date <- as.Date(last.rest.inspections$inspection_date)
 @
 
 \begin{document}
 \maketitle
 
-<<summaries>>=
+<<summariesAll>>=
 elapsed.time <- as.numeric(Sys.Date() - last.inspections$inspection_date)
 overdue <- elapsed.time[elapsed.time > 365]
 percentage.overdue <- round((length(overdue)/length(elapsed.time)*100),0)
 @ 
 
+
+According to the rules and regulations of the Department of Public
+Health, high-risk facilities are to be inspected at least once a
+year.\footnote{\url{http://www.cityofchicago.org/dam/city/depts/cdph/food_env/general/REGSSelfCertPilotdraftposting321.pdf}}
+However, from data on food inspections released by the
+department,\footnote{\url{https://data.cityofchicago.org/Health-Human-Services/Food-Inspections/4ijn-s7e5}}
+it appears that \Sexpr{percentage.overdue}\% of high-risk facilities
+have not been inspected in over a year.
+
+\subsection*{Analyses}
+To simplify the presentation, we will only discuss one kind of
+facility type: high-risk restaurants. Restaurants make up the majority
+of the facilities that the department inspects (Table
+\ref{table:facility.count}), and high-risk restaurants are the most
+common type of high-risk facility (Table
+\ref{table:facility.risk.count}).
+
+<<facilityTypes, results=tex, cache=F>>=
+facilities <- last.inspections[, c("license_no", "facility_type", "risk")]
+daycares <- c("daycare",
+              "daycare 0-6 years",
+              "daycare 1584/1585",
+              "daycare 1586",
+              "daycare 2-6, under 6",
+              "daycare (2 - 6 years)",
+              "daycare (2 years)",
+              "daycare above and under 2 years",
+              "day care center under 2 and 2 -6 years",
+              "day care combo (1586)",
+              "daycare combo 1586",
+              "daycare night",
+              "daycare under 2 and daycare above 2",
+              "daycare (under 2 years)",
+              "1584-day care above 2 years",
+              "1586")
+
+long.term.care <- c("1005",
+                    "1005 long term care",
+                    "1005 nursing home",
+                    "assissted living",
+                    "supporting living",
+                    "long term care facility",
+                    "assisted living",
+                    "nursing home",
+                    "long term care")
+                    
+facilities[facilities$facility_type %in% daycares, 
+           "facility_type"] <- "daycare, all types" 
+
+facilities[facilities$facility_type %in% long.term.care, 
+           "facility_type"] <- "long term care" 
+
+facilities[facilities$facility_type == "",
+           "facility_type"] <- "unlabeled" 
+
+facility.count <- table(facilities$facility_type)
+facility.count <- head(facility.count[order(-facility.count)], 6)
+
+top.facilities <- names(facility.count)
+
+facility.count <- cbind(facility.count, facility.count/dim(last.inspections)[1])
+facility.count <- rbind(facility.count, colSums(facility.count))
+
+rownames(facility.count) <- c(top.facilities, "Subtotal")
+colnames(facility.count) <- c("Count", "Proportion")
+
+fc.tab <- xtable(facility.count, 
+                 digits=c(0,0,2), 
+                 align='lrr',
+                 caption=paste(paste("Counts and proportions of known facilities, N = ", fm(dim(last.inspections)[1])), ". Known facilities are facilities where the result of last inspection was not `Out of Business.'", sep = ""),
+                 label="table:facility.count")
+
+print(fc.tab, format.args=list(big.mark = ","))
+@ 
+
+<<facilityRisks, results=tex, cache=F>>=
+facilities <- facilities[facilities$facility_type %in% top.facilities
+                         & facilities$risk %in% c("Risk 1 (High)", 
+                                                  "Risk 2 (Medium)", 
+                                                  "Risk 3 (Low)"),]
+
+facilities$risk <- factor(facilities$risk)
+
+risk.facilities <- table(facilities$facility_type, 
+                        facilities$risk)
+
+risk.facilities <- risk.facilities[order(-table(facilities$facility_type)),]
+#names(risk.facilities) <- facility.names
+
+fr.tab <- xtable(risk.facilities, 
+                 align='lrrr',
+                 caption = "Counts of facilities by type and risk level.",
+                 label = "table:facility.risk.count")
+print(fr.tab, format.args=list(big.mark = ","))
+@ 
+
+<<summariesAll>>=
+elapsed.rest.time <- as.numeric(Sys.Date() - last.rest.inspections$inspection_date)
+overdue.rest <- elapsed.rest.time[elapsed.rest.time > 365]
+two.year.overdue.rest <- elapsed.rest.time[elapsed.rest.time > 730]
+percentage.rest.overdue <- round((length(overdue.rest)/length(elapsed.rest.time)*100),0)
+@ 
+
+\subsubsection*{Time Since Last Inspection}
+Some \Sexpr{fm(length(overdue.rest))} high-risk restaurants or
+\Sexpr{percentage.rest.overdue}\% have gone over a year since the last
+visit from the department. Around
+\Sexpr{fm(length(two.year.overdue.rest))} have not been visited in two
+years (Figure \ref{fig:elapsed})
+
 \begin{figure}[h!]
   \centering
 <<lastInspection, fig=TRUE, cache=F>>=
 br <- seq(0, 949, 73)
-hist(elapsed.time,
+hist(elapsed.rest.time,
      breaks=br,
      xaxt="n",
-     main = "Times Since Last Inspection of Restaurants",
-     xlab = "Time Since Last Inspection", 
+     main = "Times Since Last Visit to High-Risk Restaurants",
+     xlab = "Time Since Last Visit", 
      ylab = "Number of Restaurants")
      
 axis(1, 
@@ -120,102 +256,93 @@ axis(1,
      lwd=0, 
      lwd.ticks = 1)
 @ 
-\caption{Elapsed time since last inspection of restaurants. We have omitted restaurants where the last inspection had the result ``Out of Business.''}
+\caption{Elapsed time since last visit to high-risk restaurants. We have omitted restaurants where the last visit had the result ``Out of Business.''}
 \label{fig:elapsed}
-
 \end{figure}
 
-<<interInspections,cache=T>>=
+When we first saw that so many high-risk restaurants had not been
+inspected in over a year, we thought that maybe the restaurant had not
+been inspected because the department knew that it had gone out of
+business.
 
-inspections$inspection_type == as.factor(tolower(inspections$inspection_type))
+However, we called the ten restaurants that have gone the longest
+since being inspected, and confirmed that three restaurants are still
+open. Furthermore, when we spoke with Dr. Cortland Lohff, the acting
+director of the food inspection program, he said that the department
+had no other way of knowing if a facility had closed except going to
+try to inspect it.
 
-inspections <- inspections[!tolower(inspections$inspection_type) 
-                           %in% c("no entry", 
-                                  "non-inspection", 
-                                  "no entry-short complaint"),]
+<<longestUninspected, results=tex, cache=F>>=
+longest.uninspected <- head(last.rest.inspections[order(-elapsed.rest.time), c("dba", "address", "inspection_date")], 10)
 
-rest.inspections <-  inspections[inspections$facility_type == "restaurant",]
+longest.uninspected$inspection_date <- as.character(longest.uninspected$inspection_date)
+longest.uninspected$dba <- capwords(tolower(longest.uninspected$dba))
+longest.uninspected$address <- capwords(tolower(longest.uninspected$address))
 
-non.high.risk <- unique(inspections[inspections$risk 
-                                    %in% c("Risk 2 (Medium)", 
-                                           "Risk 3 (Low)"), 
-                                    "license_no"])
+longest.uninspected <- cbind(longest.uninspected, c('No Answer', 'Open', 'Disconnected', 'Open', 'Unclear', 'Closed', 'Open', 'Disconnected', 'Disconnected', 'Disconnected'))
 
-rest.inspections <- rest.inspections[!rest.inspections$license_no 
-                                     %in% non.high.risk,]
+colnames(longest.uninspected) <- c("Name", "Address", "Last Inspected", "Status")
 
-ivt <- interVisitTimes(rest.inspections)
+
+print(xtable(longest.uninspected), include.rownames = FALSE)
+                          
 
 @ 
 
+\subsubsection*{Inspections results and time to last visit}
+High-risk restaurants that have not been inspected in a long time are
+more likely to fail an inspection when they are finally inspected.
 
-\begin{figure}[h!]
-  \centering
-<<interInspectionsHist, fig=TRUE>>=
-hist(ivt$ivt, breaks=br, xaxt="n",
-     main = "Times Since Last Vist",
-     xlab = "Time Since Last Visit", 
-     ylab = "Frequency")
-axis(1, 
-     at=c(365, 730), 
-     labels=c("One Year", "Two Years"), 
-     lwd=0, 
-     lwd.ticks = 1)
-@
-\caption{Frequency of Times between Inspections of Restaurants}
-\label{fig:intertimes}
-\end{figure}
+For this analysis we will look at the results of one type of
+inspection: canvass inspections. The department pays many different
+kinds of visits to food facilities, and canvasses are the most common
+(Table \ref{table:types.of.inspections}). Canvass inspections are the
+department's routine inspections.
 
 <<inspectionTypes, results=tex, cache=F>>=
-inspection.types <- table(inspections$inspection_type)
-inspection.types <- inspection.types*100/dim(inspections)[1]
+inspection.types <- table(rest.inspections$inspection_type)
+inspection.types <- inspection.types*100/dim(rest.inspections)[1]
 inspection.types <- inspection.types[order(-inspection.types)]
-inspection.types <- as.data.frame(inspection.types[inspection.types > 5])
+inspection.types <- as.data.frame(inspection.types[inspection.types > 4])
 inspection.types <- rbind(inspection.types, sum(inspection.types))
-rownames(inspection.types)[7] <- "Total"
+rownames(inspection.types)[dim(inspection.types)[1]] <- "Total"
 
-inspection.types.tab <- xtable(inspection.types, digits=0, caption=paste("Distribution of Inspection Types, N=", fm(dim(inspections[1]))))
+inspection.types.tab <- xtable(inspection.types, 
+                               digits=0, 
+                               caption=paste("Distribution of Inspection Types for High-Risk Restaurants, N=", fm(dim(rest.inspections[1]))),
+                               label="table:types.of.inspections")
 colnames(inspection.types.tab) <- "Percent of Inspections"
 
 print(inspection.types.tab)
 @ 
 
-\begin{figure}[h!]
-  \centering
-<<inspectionTypesHist, fig=TRUE>>=
-ivt$inspection_type <- as.factor(tolower(ivt$inspection_type))
+For each canvass inspection of high-risk restaurants, we can calculate
+how long it has been since the last time the restaurant was visited by
+a sanitarian. We can then look to see if there is a relation between
+how long it has been since a visit and the result of the canvass
+inspection. We will only look at canvass inspections which is resulted
+in a Pass, a Pass with Conditions (there were minor problems which
+were fixed while the sanitarian was on the premises), or a Fail.
 
-par(mfrow=c(3,1))
+Further, we will only look at canvass inspections where the inspection
+occurred more than two months after the last visit or less than
+eighteen months since the last visit. Canvass inspections at both
+extremes are rare and noisy.
 
-smallHist <- function(x, mainlabel, br, ymax) {
-  hist(x, 
-       breaks=br, 
-       main=mainlabel, 
-       xaxt="n", 
-       ylim=c(0, ymax),
-       xlab = "Time Since Last Visit",
-       ylab = "Number of Inspections"
-)  
-  axis(1, 
-     at=c(365, 730), 
-     labels=c("One Year", "Two Years"), 
-     lwd=0,
-     lwd.ticks = 1)
-}
+In Figure \ref{fig:passingTime}, we can see the summary trends. If a
+high-risk restaurant has not been inspected in six months, the
+likelihood that it will fail the inspection begins to climb.
 
-ymax = 800
+<<interInspections,cache=T>>=
 
-smallHist(ivt[ivt$inspection_type %in% c("canvass"), "ivt"], "Canvass", br, ymax)
+rest.inspections <- rest.inspections[!rest.inspections$inspection_type
+                                     %in% c("no entry", 
+                                            "non-inspection", 
+                                            "no entry-short complaint"),]
 
-smallHist(ivt[ivt$inspection_type %in% c("complaint"), "ivt"], "Complaint", br, ymax)
-
-smallHist(ivt[ivt$inspection_type %in% c("short form complaint"), "ivt"], 
-          "Short Form Complaint", br, ymax)
-
-par(mfrow=c(1,1))
+ivt <- interVisitTimes(rest.inspections)
 
 @ 
-\end{figure}
 
 <<ivtResults, eval=TRUE, cache=F>>=
 evaluations <- ivt[ivt$results %in% c("Pass", "Pass w/ Conditions", "Fail"),]
@@ -238,43 +365,6 @@ risk.time <- polr(results ~ scale(ivt)
                  real.evaluations, Hess=TRUE) 
 
 @ 
-
-<<risk.inspection.type, results=tex, cache=F>>=
-risk.inspection.type <- polr(results ~ inspection_type, 
-                           real.evaluations)
-
-
-
-canvass.fail <- expit(risk.inspection.type$zeta[1])
-canvass.cond.pass <- expit(risk.inspection.type$zeta[2]) - canvass.fail
-canvass.pass <- 1 - canvass.fail - canvass.cond.pass
-
-complaint.fail <- expit(risk.inspection.type$zeta[1] 
-                        - coef(risk.inspection.type)[1])
-complaint.cond.pass <- (expit(risk.inspection.type$zeta[2] 
-                              - coef(risk.inspection.type)[1])
-                        - complaint.fail)
-complaint.pass <- 1 - complaint.fail - complaint.cond.pass
-
-sf.complaint.fail <- expit(risk.inspection.type$zeta[1] 
-                        - coef(risk.inspection.type)[2])
-sf.complaint.cond.pass <- (expit(risk.inspection.type$zeta[2] 
-                              - coef(risk.inspection.type)[2])
-                        - sf.complaint.fail)
-sf.complaint.pass <- 1 - sf.complaint.fail - sf.complaint.cond.pass
-
-result.by.type <- rbind(c(canvass.fail, canvass.cond.pass, canvass.pass),
-                        c(complaint.fail, complaint.cond.pass, complaint.pass),
-                        c(sf.complaint.fail, sf.complaint.cond.pass, sf.complaint.pass)) 
-
-rownames(result.by.type) <- c("Canvass", "Complaint", "Short Form Complaint")
-colnames(result.by.type) <- c("Fail", "Cond. Pass", "Pass")
-
-xtable(result.by.type)
-                        
-
-@ 
-
 
 \begin{figure}[h!]
   \centering
@@ -358,100 +448,55 @@ rug(real.evaluations[real.evaluations$results == "Pass w/ Conditions", "ivt"], c
 par(mfrow=c(1,1))
 
 @ 
+\label{fig:passingTime}
 \caption{Proportions of failing, passing, and conditional passing results of canvass inspections of high-risk restaurants by time since last visit. We have omitted canvass inspections occurring within two months of a previous visit. Many of these ``canvass inspections'' seem to be incorrectly coded.}
 \end{figure}
 
-<<facilityTypes, results=tex, cache=F>>=
-low.risk <- unique(inspections[inspections$risk == "Risk 3 (Low)", 
-                               "license_no"])
-
-med.risk <- unique(inspections[inspections$risk == "Risk 2 (Medium)", 
-                               "license_no"])
-
-high.risk <- unique(inspections[inspections$risk == "Risk 1 (High)", 
-                                "license_no"])
-
-multi.risk <- unique(intersect(low.risk, med.risk),
-                     intersect(low.risk, high.risk),
-                     intersect(med.risk, high.risk))
-
-facilities <- unique(inspections[!inspections$license_no %in% multi.risk &
-                                 inspections$risk %in% c("Risk 1 (High)", 
-                                                         "Risk 2 (Medium)",
-                                                         "Risk 3 (Low)"),
-                                 c("license_no", "facility_type", "risk")])
-facilities$risk <- factor(facilities$risk)
-
-daycares <- c("daycare",
-              "daycare 0-6 years",
-              "daycare 1584/1585",
-              "daycare 1586",
-              "daycare 2-6, under 6",
-              "daycare (2 - 6 years)",
-              "daycare (2 years)",
-              "daycare above and under 2 years",
-              "day care center under 2 and 2 -6 years",
-              "day care combo (1586)",
-              "daycare combo 1586",
-              "daycare night",
-              "daycare under 2 and daycare above 2",
-              "daycare (under 2 years)",
-              "1584-day care above 2 years",
-              "1586")
-
-facilities[facilities$facility_type %in% daycares, 
-           "facility_type"] <- "daycare" 
-                                          
-top.facilities <- c("restaurant",
-                    "grocery store",
-                    "",
-                    "school",
-                    "daycare",
-                    "bakery")
-
-clean.unique.facilities <- dim(facilities)[1]
-
-facilities <- facilities[facilities$facility_type %in% top.facilities,]
-
-facility.names <- c("restaurant",
-                   "grocery store",
-                    "unlabeled",
-                    "school",
-                    "daycare, all types",
-                    "bakery")
-
-facility.count <- table(facilities$facility_type)
-facility.count <- facility.count[order(-facility.count)]
-facility.count <- cbind(facility.count, facility.count/clean.unique.facilities)
-facility.count <- rbind(facility.count, colSums(facility.count))
-
-rownames(facility.count) <- c(facility.names, "Total")
-colnames(facility.count) <- c("Count", "Proportion")
-
-fc.tab <- xtable(facility.count, digits=c(0,0,2))
-print(fc.tab, format.args=list(big.mark = ","))
-@ 
-
-<<facilityRisks, results=tex, cache=F>>=
 
 
-risk.facilities <- table(facilities$facility_type, 
-                        facilities$risk)
 
-risk.facilities <- risk.facilities[order(-table(facilities$facility_type)),]
-names(risk.facilities) <- facility.names
+<<risk.inspection.type, results=tex, cache=F>>=
+risk.inspection.type <- polr(results ~ inspection_type, 
+                           real.evaluations)
 
-xtable(risk.facilities)
-@ 
+canvass.fail <- expit(risk.inspection.type$zeta[1])
+canvass.cond.pass <- expit(risk.inspection.type$zeta[2]) - canvass.fail
+canvass.pass <- 1 - canvass.fail - canvass.cond.pass
 
-<<proportions, results=tex, cache=F>>=
-xtable(prop.table(risk.facilities, 1))
+complaint.fail <- expit(risk.inspection.type$zeta[1] 
+                        - coef(risk.inspection.type)[1])
+complaint.cond.pass <- (expit(risk.inspection.type$zeta[2] 
+                              - coef(risk.inspection.type)[1])
+                        - complaint.fail)
+complaint.pass <- 1 - complaint.fail - complaint.cond.pass
+
+sf.complaint.fail <- expit(risk.inspection.type$zeta[1] 
+                        - coef(risk.inspection.type)[2])
+sf.complaint.cond.pass <- (expit(risk.inspection.type$zeta[2] 
+                              - coef(risk.inspection.type)[2])
+                        - sf.complaint.fail)
+sf.complaint.pass <- 1 - sf.complaint.fail - sf.complaint.cond.pass
+
+result.by.type <- rbind(c(canvass.fail, canvass.cond.pass, canvass.pass),
+                        c(complaint.fail, complaint.cond.pass, complaint.pass),
+                        c(sf.complaint.fail, sf.complaint.cond.pass, sf.complaint.pass)) 
+
+rownames(result.by.type) <- c("Canvass", "Complaint", "Short Form Complaint")
+colnames(result.by.type) <- c("Fail", "Cond. Pass", "Pass")
+
+xtable(result.by.type)
+                      
+
 @ 
 
 
-\newpage
+
+
+
+\clearpage
+
 \appendix
-Data  problems.
+\section{Appendix: Data  problems}
 
 \subsection*{Same License Number Assigned to Different Facilities}
 Every license should have a unique license number. but I found a
@@ -544,17 +589,7 @@ kind of facility type: restaurants. All restaurants are currently
 classified as high risk facilities, and the patterns that we find for
 restaurants are much the same for other types of high risk facilities. All analyses are current as of \Sexpr{format(Sys.Date(), "%B %d, %Y")}.
 
-\subsubsection*{Time Since Last Inspection}
-First, we can look at the how long it has been since a restaurant has
-been inspected. For this analysis, we only want to consider
-restaurants that are still open for business. It's far from perfect,
-but as a first pass, we will only look at restaurants where the last
-recorded inspection was a pass, a conditional pass, or a fail.
 
-In that analysis, \Sexpr{prettyNum(length(overdue), big.mark=",")} restaurants or
-\Sexpr{percentage.overdue}\% are overdue for an inspection. In Figure
-\ref{fig:elapsed}, we can see the distribution of elapsed times since
-the last inspection.
 
 \subsubsection*{Intervals Between Inspections}
 
@@ -598,3 +633,64 @@ multi.facility <- c(1354323,
 
 
                     
+<<proportions, results=tex, cache=F>>=
+xtable(prop.table(risk.facilities, 1))
+@ 
+
+
+\begin{figure}[h!]
+  \centering
+<<interInspectionsHist, fig=TRUE>>=
+hist(ivt$ivt, breaks=br, xaxt="n",
+     main = "Times Since Last Vist",
+     xlab = "Time Since Last Visit", 
+     ylab = "Frequency")
+axis(1, 
+     at=c(365, 730), 
+     labels=c("One Year", "Two Years"), 
+     lwd=0, 
+     lwd.ticks = 1)
+@
+\caption{Frequency of Times between Inspections of Restaurants}
+\label{fig:intertimes}
+\end{figure}
+
+
+
+\begin{figure}[h!]
+  \centering
+<<inspectionTypesHist, fig=TRUE>>=
+ivt$inspection_type <- as.factor(tolower(ivt$inspection_type))
+
+par(mfrow=c(3,1))
+
+smallHist <- function(x, mainlabel, br, ymax) {
+  hist(x, 
+       breaks=br, 
+       main=mainlabel, 
+       xaxt="n", 
+       ylim=c(0, ymax),
+       xlab = "Time Since Last Visit",
+       ylab = "Number of Inspections"
+)  
+  axis(1, 
+     at=c(365, 730), 
+     labels=c("One Year", "Two Years"), 
+     lwd=0,
+     lwd.ticks = 1)
+}
+
+ymax = 800
+
+smallHist(ivt[ivt$inspection_type %in% c("canvass"), "ivt"], "Canvass", br, ymax)
+
+smallHist(ivt[ivt$inspection_type %in% c("complaint"), "ivt"], "Complaint", br, ymax)
+
+smallHist(ivt[ivt$inspection_type %in% c("short form complaint"), "ivt"], 
+          "Short Form Complaint", br, ymax)
+
+par(mfrow=c(1,1))
+
+@ 
+\end{figure}
+
