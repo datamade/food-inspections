@@ -452,7 +452,20 @@ par(mfrow=c(1,1))
 \caption{Proportions of failing, passing, and conditional passing results of canvass inspections of high-risk restaurants by time since last visit. We have omitted canvass inspections occurring within two months of a previous visit. Many of these ``canvass inspections'' seem to be incorrectly coded.}
 \end{figure}
 
+\subsubsection*{Complaints and Inspection Results}
+In addition to routine canvasses, the department also inspects
+restaurants in response to citizen complaints registered in the city's
+311 system. According to Dr. Lohff, the department responds to these
+complaints in two ways. If the restaurant has not been inspected
+recently, then a sanitarian will do a full inspection. These are
+``Complaint'' type inspections. If the restaurant has been inspected
+recently, then a sanitarian does a more limited inspection. These are
+called ``Short Form Complaints.''
 
+Compared to routine canvasses, a full inspection in response to a
+complaint is more likely to result in a failed inspection. However,
+``Short Form Complaints'' rarely result in a the restaurant failing
+(Table \ref{tab:result.by.type}).
 
 
 <<risk.inspection.type, results=tex, cache=F>>=
@@ -484,7 +497,7 @@ result.by.type <- rbind(c(canvass.fail, canvass.cond.pass, canvass.pass),
 rownames(result.by.type) <- c("Canvass", "Complaint", "Short Form Complaint")
 colnames(result.by.type) <- c("Fail", "Cond. Pass", "Pass")
 
-xtable(result.by.type)
+xtable(result.by.type, label="tab:result.by.type", caption="Proportions of High-Risk Restaurants Failing, Passing Conditionally, or Passing by Inspection Type")
                       
 
 @ 
